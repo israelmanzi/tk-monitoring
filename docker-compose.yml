@@ -1,50 +1,82 @@
 services:
+  alloy:
+    image: grafana/alloy:v1.0.0
+    pull_policy: always
+    profiles: ['alloy']
+    restart: on-failure
+    volumes:
+      - ./config/alloy:/etc/alloy
+    environment:
+      REMOTE_WRITE_HOST: mimir:9009
+      LOKI_HOST: loki:3100
+      TEMPO_HOST: tempo:4317
+    depends_on:
+      - mimir
+      - loki
+      - tempo
+      - pyroscope
+    command:
+      - run
+      - /etc/alloy/config.alloy
+      - --storage.path=/var/lib/alloy/data
+      - --server.http.listen-addr=0.0.0.0:12345
+      - --stability.level=experimental
+    ports:
+      - '12345:12345'
+
+  nginx:
+    image: nginx:latest
+    restart: on-failure
+    volumes:
+      - ./config/nginx:/etc/nginx/conf.d
+    ports:
+      - '4000:80'
+
+  mimir:
+    image: grafana/mimir:2.12.0
+    restart: on-failure
+    command:
+      - -config.file=/etc/mimir-config/mimir.yml
+    volumes:
+      - ./config/mimir:/etc/mimir-config
+    ports:
+      - '9009:9009'
+
   loki:
-    image: grafana/loki:latest
+    image: grafana/loki:3.0.0
+    restart: on-failure
     ports:
       - '3100:3100'
-    command: -config.file=/etc/loki/local-config.yaml
 
-  prometheus:
-    image: prom/prometheus:latest
+  tempo:
+    image: grafana/tempo:2.4.1
+    restart: on-failure
     command:
-      - --web.enable-remote-write-receiver
-      - --config.file=/etc/prometheus/prometheus.yml
+      - '-storage.trace.backend=local'
+      - '-storage.trace.local.path=/tmp/tempo/traces'
+      - '-storage.trace.wal.path=/tmp/tempo/wal'
+      - '-auth.enabled=false'
+      - '-server.http-listen-port=3200'
     ports:
-      - '9090:9090'
+      - '3200:3200'
+      - '4317:4317'
+
+  pyroscope:
+    image: grafana/pyroscope:1.5.0
+    restart: on-failure
+    ports:
+      - '4040:4040'
 
   grafana:
-    environment:
-      - GF_PATHS_PROVISIONING=/etc/grafana/provisioning
-      - GF_AUTH_ANONYMOUS_ENABLED=true
-      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
-    entrypoint:
-      - sh
-      - -euc
-      - |
-        mkdir -p /etc/grafana/provisioning/datasources
-        cat <<EOF > /etc/grafana/provisioning/datasources/ds.yaml
-        apiVersion: 1
-        datasources:
-        - name: Loki
-          type: loki
-          access: proxy
-          orgId: 1
-          url: http://loki:3100
-          basicAuth: false
-          isDefault: false
-          version: 1
-          editable: false
-        - name: Prometheus
-          type: prometheus
-          orgId: 1
-          url: http://prometheus:9090
-          basicAuth: false
-          isDefault: true
-          version: 1
-          editable: false
-        EOF
-        /run.sh
     image: grafana/grafana:latest
+    restart: on-failure
+    volumes:
+      - ./config/grafana:/etc/grafana-config
+      - ./config/grafana/datasources:/etc/grafana/provisioning/datasources
     ports:
       - '3000:3000'
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://localhost:3000/healthz']
+      interval: 1s
+      timeout: 10s
+      retries: 5
