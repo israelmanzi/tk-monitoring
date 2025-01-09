@@ -30,7 +30,7 @@ services:
     volumes:
       - ./config/nginx:/etc/nginx/conf.d
     ports:
-      - '4000:80'
+      - '4000:4000'
 
   mimir:
     image: grafana/mimir:2.12.0

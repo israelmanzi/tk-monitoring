@@ -1,14 +1,14 @@
-// This file serves as an example Alloy configuration to interact with the
-// Docker Compose environment.
-//
-// This configuration works whether you are running Alloy locally or within the
-// Docker Compose environment when the `alloy` profile is enabled.
-
 logging {
 	level = "debug"
 
-	// Forward internal logs to the local Loki instance.
 	write_to = [loki.relabel.alloy_logs.receiver]
+}
+
+faro.receiver "default" {
+	output {
+		logs = [loki.write.loki.receiver]
+		traces = [otelcol.exporter.otlp.tempo.input]
+	}
 }
 
 loki.relabel "alloy_logs"{
@@ -26,23 +26,17 @@ loki.relabel "alloy_logs"{
 }
 
 tracing {
-	// Write all spans. Don't do this in production!
 	sampling_fraction = 1.0
 
-	// Forward internal spans to the local Tempo instance.
 	write_to = [otelcol.exporter.otlp.tempo.input]
 }
 
-// Collect metrics from the local running Alloy instance and forward to
-// Prometheus.
 prometheus.exporter.self "alloy" {}
 prometheus.scrape "alloy" {
 	targets    = prometheus.exporter.self.alloy.targets
 	forward_to = [prometheus.remote_write.mimir.receiver]
 }
 
-// Collect profiles from the local running Alloy instance and forward to
-// Pyroscope.
 pyroscope.scrape "default" {
   targets = [
     {"__address__" = "localhost:12345", "service_name" = "alloy"},
@@ -54,7 +48,7 @@ prometheus.remote_write "mimir" {
 	endpoint {
 		url = string.format(
 			"http://%s/api/v1/push",
-			coalesce(sys.env("REMOTE_WRITE_HOST"), "192.168.100.170:9009"),
+			coalesce(sys.env("REMOTE_WRITE_HOST"), "10.110.27.214:9009"),
 		)
 	}
 }
@@ -63,14 +57,14 @@ loki.write "loki" {
 	endpoint {
 		url = string.format(
 			"http://%s/loki/api/v1/push",
-			coalesce(sys.env("LOKI_HOST"), "192.168.100.170:3100"),
+			coalesce(sys.env("LOKI_HOST"), "10.110.27.214:3100"),
 		)
 	}
 }
 
 otelcol.exporter.otlp "tempo" {
 	client {
-		endpoint = coalesce(sys.env("TEMPO_HOST"), "192.168.100.170:4317")
+		endpoint = coalesce(sys.env("TEMPO_HOST"), "10.110.27.214:4317")
 
 		tls {
 			insecure = true
@@ -82,7 +76,7 @@ pyroscope.write "pyroscope" {
 	endpoint {
 		url = string.format(
 			"http://%s",
-			coalesce(sys.env("PYROSCOPE_HOST"), "192.168.100.170:4040"),
+			coalesce(sys.env("PYROSCOPE_HOST"), "10.110.27.214:4040"),
 		)
 	}
 }
