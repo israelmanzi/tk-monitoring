@@ -1,82 +1,115 @@
+prometheus.scrape "metrics_scrape" {
+	targets = [{
+		__address__ = format("%s:%s", "loki", "3100"),
+	}]
+	forward_to = [prometheus.remote_write.metrics_write.receiver]
+	job_name   = "tekana-monitoring"
+}
+
+prometheus.remote_write "metrics_write" {
+	endpoint {
+		name = "tekana-monitoring"
+		url  = format("http://%s:%s/api/v1/push", "mimir", "9009")
+		queue_config { }
+		metadata_config { }
+	}
+}
+
+loki.process "logs_process_client" {
+  forward_to = [loki.write.logs_write_client.receiver]
+
+  stage.logfmt {
+      mapping = { "kind" = "", "service_name" = "", "app" = "" }
+  }
+
+  stage.labels {
+      values = { "kind" = "kind", "service_name" = "service_name", "app" = "app" }
+  }
+}
+
+loki.write "logs_write_client" {
+	endpoint {
+		url = format("http://%s:%s/loki/api/v1/push", "loki", "3100")
+	}
+	external_labels = {
+        }
+}
+
+
+local.file_match "logs_file_server" {
+	path_targets = [{
+		__address__ = "localhost",
+		__path__    = "/var/log/server.log",
+		app         = env("tekana-monitoring"),
+	}]
+}
+
+loki.source.file "logs_source_server" {
+	targets               = local.file_match.logs_file_server.targets
+	forward_to            = [loki.write.logs_write_server.receiver]
+	legacy_positions_file = "/tmp/positions-server.yaml"
+}
+
+loki.write "logs_write_server" {
+	endpoint {
+		url = format("http://%s:%s/loki/api/v1/push", "loki", "3100")
+	}
+	external_labels = {
+        }
+}
+
 logging {
-	level = "debug"
-
-	write_to = [loki.relabel.alloy_logs.receiver]
+	level = "info"
 }
 
-faro.receiver "default" {
+faro.receiver "integrations_app_agent_receiver" {
+	extra_log_labels = {
+		app  = "tekana-monitoring",
+		kind = "",
+	}
+
+	server {
+		listen_address           = "0.0.0.0"
+		listen_port              = 8027
+		cors_allowed_origins     = ["*"]
+		max_allowed_payload_size = "10MiB"
+
+		rate_limiting {
+			rate = 50
+		}
+	}
+
+	sourcemaps { }
+
 	output {
-		logs = [loki.write.loki.receiver]
-		traces = [otelcol.exporter.otlp.tempo.input]
+		logs   = [loki.process.logs_process_client.receiver]
+		traces = [otelcol.exporter.otlp.trace_write.input]
 	}
 }
 
-loki.relabel "alloy_logs"{
-	rule {
-		target_label = "instance"
-		replacement = constants.hostname
+otelcol.receiver.otlp "default" {
+	grpc {
+		include_metadata = true
 	}
 
-	rule {
-		target_label = "job"
-		replacement = "integrations/self"
-	}
-
-	forward_to = [loki.write.loki.receiver]
-}
-
-tracing {
-	sampling_fraction = 1.0
-
-	write_to = [otelcol.exporter.otlp.tempo.input]
-}
-
-prometheus.exporter.self "alloy" {}
-prometheus.scrape "alloy" {
-	targets    = prometheus.exporter.self.alloy.targets
-	forward_to = [prometheus.remote_write.mimir.receiver]
-}
-
-pyroscope.scrape "default" {
-  targets = [
-    {"__address__" = "localhost:12345", "service_name" = "alloy"},
-  ]
-  forward_to = [pyroscope.write.pyroscope.receiver]
-}
-
-prometheus.remote_write "mimir" {
-	endpoint {
-		url = string.format(
-			"http://%s/api/v1/push",
-			coalesce(sys.env("REMOTE_WRITE_HOST"), "10.110.27.214:9009"),
-		)
+	output {
+		metrics = []
+		logs    = []
+		traces  = [otelcol.exporter.otlp.trace_write.input]
 	}
 }
 
-loki.write "loki" {
-	endpoint {
-		url = string.format(
-			"http://%s/loki/api/v1/push",
-			coalesce(sys.env("LOKI_HOST"), "10.110.27.214:3100"),
-		)
-	}
-}
 
-otelcol.exporter.otlp "tempo" {
+otelcol.exporter.otlp "trace_write" {
+	retry_on_failure {
+		max_elapsed_time = "1m0s"
+	}
+
 	client {
-		endpoint = coalesce(sys.env("TEMPO_HOST"), "10.110.27.214:4317")
+		endpoint = format("%s:%s", "tempo", "4317")
 
 		tls {
 			insecure = true
 		}
-	}
-}
-
-pyroscope.write "pyroscope" {
-	endpoint {
-		url = string.format(
-			"http://%s",
-			coalesce(sys.env("PYROSCOPE_HOST"), "10.110.27.214:4040"),
-		)
 	}
 }

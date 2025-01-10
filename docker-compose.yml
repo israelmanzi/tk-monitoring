@@ -1,82 +1,60 @@
 services:
-  alloy:
-    image: grafana/alloy:v1.0.0
-    pull_policy: always
-    profiles: ['alloy']
-    restart: on-failure
-    volumes:
-      - ./config/alloy:/etc/alloy
-    environment:
-      REMOTE_WRITE_HOST: mimir:9009
-      LOKI_HOST: loki:3100
-      TEMPO_HOST: tempo:4317
-    depends_on:
-      - mimir
-      - loki
-      - tempo
-      - pyroscope
-    command:
-      - run
-      - /etc/alloy/config.alloy
-      - --storage.path=/var/lib/alloy/data
-      - --server.http.listen-addr=0.0.0.0:12345
-      - --stability.level=experimental
-    ports:
-      - '12345:12345'
-
-  nginx:
-    image: nginx:latest
-    restart: on-failure
-    volumes:
-      - ./config/nginx:/etc/nginx/conf.d
-    ports:
-      - '4000:4000'
-
   mimir:
-    image: grafana/mimir:2.12.0
-    restart: on-failure
-    command:
-      - -config.file=/etc/mimir-config/mimir.yml
+    image: 'grafana/mimir:2.12.0'
     volumes:
-      - ./config/mimir:/etc/mimir-config
+      - './config/mimir:/etc/mimir'
+    entrypoint:
+      - '/bin/mimir'
+      - '-config.file=/etc/mimir/mimir.yaml'
     ports:
       - '9009:9009'
 
+  grafana:
+    image: 'grafana/grafana:10.4.2'
+    volumes:
+      - './config/grafana/config:/etc/grafana-config'
+      - './config/grafana/datasources:/etc/grafana/provisioning/datasources'
+      - './config/grafana/dashboards-provisioning:/etc/grafana/provisioning/dashboards'
+      - './config/grafana/dashboards:/var/lib/grafana/dashboards'
+    entrypoint:
+      - '/usr/share/grafana/bin/grafana-server'
+      - '--homepath=/usr/share/grafana'
+      - '--config=/etc/grafana-config/grafana.ini'
+    ports:
+      - '3000:3000'
+
   loki:
-    image: grafana/loki:3.0.0
-    restart: on-failure
+    image: 'grafana/loki:3.0.0'
+    command: '-config.file=/etc/loki/local-config.yaml'
     ports:
       - '3100:3100'
 
   tempo:
-    image: grafana/tempo:2.4.1
-    restart: on-failure
+    image: 'grafana/tempo:2.4.1'
+    volumes:
+      - './config/tempo:/etc/tempo-config'
     command:
-      - '-storage.trace.backend=local'
-      - '-storage.trace.local.path=/tmp/tempo/traces'
-      - '-storage.trace.wal.path=/tmp/tempo/wal'
-      - '-auth.enabled=false'
-      - '-server.http-listen-port=3200'
+      - '-config.file=/etc/tempo-config/tempo.yaml'
+      - '-config.expand-env=true'
     ports:
       - '3200:3200'
-      - '4317:4317'
 
-  pyroscope:
-    image: grafana/pyroscope:1.5.0
-    restart: on-failure
-    ports:
-      - '4040:4040'
-
-  grafana:
-    image: grafana/grafana:latest
-    restart: on-failure
+  alloy:
+    image: 'grafana/alloy:v1.0.0'
     volumes:
-      - ./config/grafana:/etc/grafana-config
-      - ./config/grafana/datasources:/etc/grafana/provisioning/datasources
+      - './config/alloy:/etc/alloy'
+    entrypoint:
+      - '/bin/alloy'
+      - 'run'
+      - '--server.http.listen-addr=0.0.0.0:12345'
+      - '--config.extra-args="-config.expand-env"'
+      - '/etc/alloy/config.alloy'
     ports:
-      - '3000:3000'
-    healthcheck:
-      test: ['CMD', 'curl', '-f', 'http://localhost:3000/healthz']
-      interval: 1s
-      timeout: 10s
-      retries: 5
+      - '12345:12345'
+      - '8027:8027'
+      - '4317:4317'
+    depends_on:
+      - 'mimir'
+      - 'grafana'
+      - 'loki'
+      - 'tempo'
