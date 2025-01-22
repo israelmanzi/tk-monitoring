@@ -1,41 +1,13 @@
 services:
-  collector:
-    image: otel/opentelemetry-collector-contrib:0.91.0
+  mimir:
+    image: 'grafana/mimir:2.12.0'
     volumes:
-      - ./config/otel-collector:/etc/otel-config
-    command:
-      - --config=/etc/otel-config/otel-config.yaml
+      - './config/mimir:/etc/mimir'
+    entrypoint:
+      - '/bin/mimir'
+      - '-config.file=/etc/mimir/mimir.yaml'
     ports:
-      - '8889:8889'
-      - '4317'
-      - '4318:4318'
-    depends_on:
-      - tempo
-      - loki
-
-  # mimir:
-  #   image: 'grafana/mimir:2.12.0'
-  #   volumes:
-  #     - './config/mimir:/etc/mimir'
-  #   entrypoint:
-  #     - '/bin/mimir'
-  #     - '-config.file=/etc/mimir/mimir.yaml'
-  #   ports:
-  #     - '9009:9009'
-
-  prometheus:
-    image: prom/prometheus
-    volumes:
-      - ./config/prometheus:/etc/prometheus
-      - prometheus_data:/prometheus
-    command:
-      - --config.file=/etc/prometheus/prometheus.yaml
-      - --enable-feature=exemplar-storage
-      - --web.enable-remote-write-receiver
-    ports:
-      - '9090:9090'
-    depends_on:
-      - collector
+      - '9009:9009'
 
   grafana:
     image: 'grafana/grafana:10.4.2'
@@ -44,37 +16,18 @@ services:
       - './config/grafana/datasources:/etc/grafana/provisioning/datasources'
       - './config/grafana/dashboards-provisioning:/etc/grafana/provisioning/dashboards'
       - './config/grafana/dashboards:/var/lib/grafana/dashboards'
-      - grafana_data:/var/lib/grafana
     entrypoint:
       - '/usr/share/grafana/bin/grafana-server'
       - '--homepath=/usr/share/grafana'
       - '--config=/etc/grafana-config/grafana.ini'
     ports:
       - '3000:3000'
-    depends_on:
-      - collector
-      - prometheus
-
-  promtail:
-    image: grafana/promtail:latest
-    volumes:
-      - ./config/promtail:/etc/promtail
-      - /var/lib/docker/containers:/var/lib/docker/containers:ro
-      - /var/run/docker.sock:/var/run/docker.sock
-      - promtail_positions:/tmp/positions
-    command:
-      - '-config.file=/etc/promtail/config.yaml'
-      - '-config.expand-env=true'
 
   loki:
     image: 'grafana/loki:3.0.0'
     command: '-config.file=/etc/loki/local-config.yaml'
-    volumes:
-      - loki_data:/loki
     ports:
       - '3100:3100'
-    depends_on:
-      - promtail
 
   tempo:
     image: 'grafana/tempo:2.4.1'
@@ -86,8 +39,22 @@ services:
     ports:
       - '3200:3200'
 
-volumes:
-  grafana_data:
-  loki_data:
-  prometheus_data:
-  promtail_positions:
+  alloy:
+    image: 'grafana/alloy:v1.0.0'
+    volumes:
+      - './config/alloy:/etc/alloy'
+    entrypoint:
+      - '/bin/alloy'
+      - 'run'
+      - '--server.http.listen-addr=0.0.0.0:12345'
+      - '--config.extra-args="-config.expand-env"'
+      - '/etc/alloy/config.alloy'
+    ports:
+      - '12345:12345'
+      - '8027:8027'
+      - '4317:4317'
+    depends_on:
+      - 'mimir'
+      - 'grafana'
+      - 'loki'
+      - 'tempo'
